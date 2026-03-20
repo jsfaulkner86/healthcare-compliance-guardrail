@@ -20,6 +20,26 @@ A middleware guardrail system built with LangChain that:
 - Logs compliance events for audit trail purposes
 - Returns sanitized, compliant responses
 
+```mermaid
+flowchart LR
+    A[Agent Input\nraw clinical text] --> B[PHI Detection\n18 HIPAA Identifiers\nregex pattern scan]
+
+    B -->|PHI detected| C[PHI Masking\nSSN · DOB · MRN\nPhone · Email · ZIP]
+    B -->|No PHI| D[JCAHO Checkpoint\nLLM compliance review\nPASS / FAIL]
+    C --> D
+
+    D -->|FAIL| E[🚫 Action Blocked\nrationale returned]
+    D -->|PASS| F[Agent Execution\nagent_fn called\nwith sanitized input]
+
+    F --> G[Output PHI Scan\ncheck for PHI leakage\nin LLM response]
+
+    G -->|PHI in output| H[Output Masking\nre-sanitize response]
+    G -->|Clean| I[Audit Record Written\nSQLite · SHA-256 hash\ntimestamp · agent_id]
+    H --> I
+
+    I --> J[Compliant Response\nreturned to caller]
+```
+
 ## Tech Stack
 
 | Layer | Technology |
