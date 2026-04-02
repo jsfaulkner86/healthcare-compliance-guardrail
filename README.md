@@ -1,88 +1,143 @@
 # Healthcare Compliance Guardrail
 
-> **LangChain + Middleware** — The compliance layer every healthcare AI system needs
+> **LangChain + Middleware** — The compliance layer every healthcare AI system needs, built as reusable infrastructure
 
 [![Python](https://img.shields.io/badge/Python-3776AB?style=flat-square&logo=python&logoColor=white)]()
 [![LangChain](https://img.shields.io/badge/LangChain-000000?style=flat-square)]()
 [![HIPAA](https://img.shields.io/badge/HIPAA-Compliant-blue?style=flat-square)]()
 [![Healthcare AI](https://img.shields.io/badge/Healthcare-AI-red?style=flat-square)]()
 
-## The Problem
+Built by [The Faulkner Group](https://thefaulknergroupadvisors.com) — designed from real HIPAA compliance requirements across enterprise Epic EHR deployments.
 
-Most healthcare AI systems are built without compliance baked in — it's bolted on as an afterthought. This creates real risk: PHI exposure, regulatory violations, and hallucinated clinical guidance. This guardrail layer intercepts agent outputs before they reach users and enforces compliance rules at runtime.
+---
 
-## What It Does
+## Problem Statement
 
-A middleware guardrail system built with LangChain that:
-- Intercepts LLM outputs before delivery to the end user
-- Scans for potential PHI patterns and flags violations
-- Blocks clinically unsafe or out-of-scope recommendations
-- Logs compliance events for audit trail purposes
-- Returns sanitized, compliant responses
+Most healthcare AI systems bolt compliance on as an afterthought — a regex check here, a disclaimer there. This creates compounding risk: PHI exposure in LLM API calls, hallucinated clinical guidance delivered to end users, and no audit trail to demonstrate what the system actually did.
 
-```mermaid
-flowchart LR
-    A[Agent Input\nraw clinical text] --> B[PHI Detection\n18 HIPAA Identifiers\nregex pattern scan]
+This guardrail layer is the compliance infrastructure that wraps any healthcare agent. It intercepts inputs before they reach the LLM, enforces JCAHO compliance rules, scans outputs before delivery, and writes an immutable audit record on every execution — satisfying HIPAA 45 CFR §164.312(b) without requiring changes to the underlying agent.
 
-    B -->|PHI detected| C[PHI Masking\nSSN · DOB · MRN\nPhone · Email · ZIP]
-    B -->|No PHI| D[JCAHO Checkpoint\nLLM compliance review\nPASS / FAIL]
-    C --> D
+---
 
-    D -->|FAIL| E[🚫 Action Blocked\nrationale returned]
-    D -->|PASS| F[Agent Execution\nagent_fn called\nwith sanitized input]
+## System Architecture
 
-    F --> G[Output PHI Scan\ncheck for PHI leakage\nin LLM response]
-
-    G -->|PHI in output| H[Output Masking\nre-sanitize response]
-    G -->|Clean| I[Audit Record Written\nSQLite · SHA-256 hash\ntimestamp · agent_id]
-    H --> I
-
-    I --> J[Compliant Response\nreturned to caller]
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                   Incoming Agent Input                           │
+│             raw clinical text · patient context                  │
+└─────────────────────────────┬───────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                   Guardrail Middleware Layer                     │
+│                                                                  │
+│  [PHI Input Scan]         18-identifier regex + NER (roadmap)    │
+│       │ PHI detected?                                            │
+│       ▼ yes                                                       │
+│  [PHI Masking]            replace with [PHI_TYPE] tokens          │
+│       │                                                           │
+│       ▼ (clean or masked input)                                   │
+│  [JCAHO Checkpoint]       LLM-as-judge: PASS / FAIL              │
+│       │ FAIL?                                                     │
+│       ▼                                                           │
+│  🚫 [ACTION BLOCKED]      rationale returned; execution halted    │
+│       │ PASS                                                      │
+│       ▼                                                           │
+│  [Agent Execution]        agent_fn called with sanitized input    │
+│       │                                                           │
+│       ▼                                                           │
+│  [PHI Output Scan]        check for PHI leakage in LLM response   │
+│       │ PHI in output?                                            │
+│       ▼ yes                                                       │
+│  [Output Masking]         re-sanitize before delivery             │
+│       │                                                           │
+│       ▼                                                           │
+│  [Audit Record Written]   SHA-256 hash · PostgreSQL append-only   │
+│       │                                                           │
+│       ▼                                                           │
+│  ✅ Compliant Response Delivered                                   │
+└─────────────────────────────────────────────────────────────────┘
+          │ PostgreSQL append-only guardrail_audit_log
+          ▼ (SHA-256 hash only — never raw PHI)
+┌─────────────────────────────────────────────────────────────────┐
+│  guardrail_audit_log                                              │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-## Tech Stack
+### Core Design Principles
 
-| Layer | Technology |
-|---|---|
-| Agent Framework | LangChain |
-| Guardrail Layer | Custom Python middleware |
-| LLM | OpenAI GPT-4 |
-| Language | Python 3.11+ |
+- **Guardrail is a wrapper, not a component** — the underlying agent function is unchanged. Wrap any `agent_fn(input) -> output` and compliance is enforced without modifying agent code.
+- **Input hash, never raw content** — the audit log stores SHA-256 of raw input only. This satisfies the HIPAA audit trail requirement without creating a secondary PHI repository.
+- **A failed audit write never bypasses the guardrail** — if Postgres is unavailable, the guardrail still runs and blocks non-compliant actions. The audit log is a record, not a gate.
+- **JCAHO checkpoint is LLM-as-judge** — the compliance review is itself a GPT-4o call with a strict clinical safety prompt. This handles nuanced cases that regex alone misses.
+
+---
+
+## Repository Structure
+
+```
+healthcare-compliance-guardrail/
+├── main.py                         # GuardrailMiddleware class + AuditRecord (SQLite)
+├── requirements.txt
+├── .env.example
+│
+├── audit/
+│   ├── models.py                   # GuardrailAuditEvent Pydantic model (14 event types)
+│   ├── logger.py                   # Append-only asyncpg PostgreSQL writer
+│   ├── queries.py                  # PHI detection summary, block rate by agent, compliance KPIs
+│   └── migrations/
+│       └── 001_create_guardrail_audit_log.sql
+│
+└── tests/
+    └── test_audit.py
+```
+
+---
+
+## Technology Stack
+
+| Layer | Technology | Rationale |
+|---|---|---|
+| **Middleware Framework** | LangChain | Chain composition for PHI scan → JCAHO check → agent → output scan |
+| **PHI Detection** | Regex (8 identifiers) + Presidio (roadmap) | Regex for deterministic patterns; Presidio NER for names, dates, geographies |
+| **JCAHO Review** | OpenAI GPT-4o (LLM-as-judge) | PASS/FAIL compliance gate with rationale — handles nuanced clinical scope violations |
+| **Audit Store** | PostgreSQL + asyncpg (primary) + SQLite (local dev) | PostgreSQL for production; SQLite for zero-infrastructure local testing |
+| **Language** | Python 3.11+ | Async-native; type hints throughout |
+
+---
 
 ## HIPAA Threat Model
 
-This guardrail defends against the three primary HIPAA violation vectors in LLM-based healthcare AI:
-
 | Threat Vector | Risk | Guardrail Defense |
 |---|---|---|
-| PHI echo in LLM output | Model regurgitates patient identifiers from context | Output PHI scan + masking before response delivery |
+| PHI echo in LLM output | Model regurgitates patient identifiers | Output PHI scan + masking before response delivery |
 | PHI in agent input | Clinical notes sent raw to LLM API | Input PHI detection + masking before LLM call |
-| Audit trail gap | No record of what the agent processed or decided | SHA-256 hashed input + structured SQLite audit log per 45 CFR §164.312(b) |
-| Hallucinated clinical guidance | LLM invents diagnoses, dosages, or recommendations | JCAHO checkpoint — LLM-as-judge compliance review before execution |
-| Unscoped agent action | Agent takes clinical action beyond its authorized scope | Action classification + JCAHO PASS/FAIL gate |
+| Audit trail gap | No record of agent execution | SHA-256 hashed input + append-only Postgres log per 45 CFR §164.312(b) |
+| Hallucinated clinical guidance | LLM invents diagnoses, dosages, or treatment plans | JCAHO checkpoint — GPT-4o-as-judge blocks before execution |
+| Out-of-scope agent action | Agent takes action beyond authorized clinical scope | Action classification + JCAHO PASS/FAIL gate |
 
 ---
 
 ## PHI Identifier Coverage
 
-Covers 8 of the [18 HIPAA Safe Harbor identifiers](https://www.hhs.gov/hipaa/for-professionals/privacy/special-topics/de-identification/index.html) via regex pattern matching:
+Current regex coverage (8 of 18 HIPAA Safe Harbor identifiers):
 
-| Identifier | Pattern Type | Status |
+| Identifier | Pattern | Status |
 |---|---|---|
-| Social Security Number | `\d{3}-\d{2}-\d{4}` | ✅ Covered |
-| Date of Birth | MM/DD/YYYY format | ✅ Covered |
-| Phone Number | US formats + E.164 | ✅ Covered |
-| Email Address | RFC 5322 pattern | ✅ Covered |
-| Medical Record Number | `MRN: XXXXXXXX` | ✅ Covered |
-| ZIP Code | 5-digit + ZIP+4 | ✅ Covered |
-| IP Address | IPv4 | ✅ Covered |
-| Device Identifier | MAC address format | ✅ Covered |
-| Full Name | NER model required | 🔜 Roadmap |
-| Geographic data (sub-ZIP) | NER model required | 🔜 Roadmap |
-| Dates (other than DOB) | Contextual parsing | 🔜 Roadmap |
-| Account / Certificate numbers | Domain-specific patterns | 🔜 Roadmap |
+| Social Security Number | `\d{3}-\d{2}-\d{4}` | ✅ |
+| Date of Birth | MM/DD/YYYY | ✅ |
+| Phone Number | US formats + E.164 | ✅ |
+| Email Address | RFC 5322 | ✅ |
+| Medical Record Number | `MRN: XXXXXXXX` | ✅ |
+| ZIP Code | 5-digit + ZIP+4 | ✅ |
+| IP Address | IPv4 | ✅ |
+| Device Identifier | MAC address | ✅ |
+| Full Name | NER required | 🔜 Roadmap |
+| Geographic data (sub-ZIP) | NER required | 🔜 Roadmap |
+| Other dates (admit, discharge) | Contextual | 🔜 Roadmap |
+| Account / Certificate numbers | Domain patterns | 🔜 Roadmap |
 
-> Full 18-identifier coverage requires NER-based detection (e.g., AWS Comprehend Medical, spaCy with `en_core_med7`). Roadmap item.
+> Full 18-identifier coverage requires NER — AWS Comprehend Medical or spaCy `en_core_med7`. See roadmap.
 
 ---
 
@@ -90,60 +145,101 @@ Covers 8 of the [18 HIPAA Safe Harbor identifiers](https://www.hhs.gov/hipaa/for
 
 | Control | Framework | Implementation |
 |---|---|---|
-| Audit controls | HIPAA 45 CFR §164.312(b) | SHA-256 hashed input log, timestamped per event |
-| Access control | HIPAA 45 CFR §164.312(a) | `agent_id` scoped per guardrail instance |
-| Transmission security | HIPAA 45 CFR §164.312(e) | PHI masked before any LLM API call (data never leaves unmasked) |
+| Audit controls | HIPAA 45 CFR §164.312(b) | SHA-256 input hash + timestamped `guardrail_audit_log` |
+| Transmission security | HIPAA 45 CFR §164.312(e) | PHI masked before any LLM API call |
 | Information integrity | JCAHO NPSG.01.01.01 | JCAHO checkpoint gate before agent execution |
-| Minimum necessary | HIPAA Privacy Rule | PHI masked to minimum required for agent task |
-| Incident response | HITRUST CSF 11.a | Audit log captures all PHI detection and masking events |
+| Minimum necessary | HIPAA Privacy Rule | PHI masked to token; raw content never stored or transmitted |
+| Incident response | HITRUST CSF 11.a | All PHI detection and masking events logged with identifiers detected |
+| Access control | HIPAA 45 CFR §164.312(a) | `agent_id` scoped per guardrail instance |
 
 ---
 
-## Audit Record Schema
+## Audit Event Lifecycle
 
-Every agent execution writes an immutable audit record:
-
-```python
-class AuditRecord(BaseModel):
-    timestamp: str        # UTC ISO 8601
-    agent_id: str         # Scoped agent identifier
-    action: str           # What the agent was asked to do
-    input_hash: str       # SHA-256 of raw input — never stores PHI
-    phi_detected: list    # Which HIPAA identifiers were found
-    phi_masked: bool      # Whether masking was applied
-    jcaho_check_passed: bool  # JCAHO compliance gate result
-    output_safe: bool     # Whether output was PHI-free
-    notes: str            # JCAHO rationale
+```
+input_received
+    └── phi_scan_input
+            └── phi_detected_input → phi_masked_input (if PHI found)
+                    └── jcaho_checkpoint_started
+                            └── jcaho_checkpoint_passed → agent_executed
+                            │       └── phi_scan_output
+                            │               └── phi_detected_output → phi_masked_output
+                            │                       └── compliant_response_delivered
+                            └── jcaho_checkpoint_failed → action_blocked
 ```
 
-> The audit log stores the **hash** of input, never the raw content — satisfying the audit trail requirement under 45 CFR §164.312(b) without creating a secondary PHI repository.
+---
 
-## Getting Started
+## Audit Analytics
+
+| Query Method | Use Case |
+|---|---|
+| `get_execution_trail(execution_id)` | Full compliance trace for a single invocation |
+| `get_phi_detection_summary()` | Most frequent PHI identifier types — guides regex coverage roadmap |
+| `get_block_rate_by_agent()` | Which agents are producing non-compliant outputs |
+| `get_compliance_summary()` | Aggregate KPIs: PHI detection rate, block rate, JCAHO failure rate |
+
+---
+
+## Integrating with Other Agents
+
+This guardrail is designed to wrap any agent function:
+
+```python
+from main import guardrail_middleware
+
+# Wrap any agent function
+result = await guardrail_middleware(
+    agent_fn=my_clinical_agent,
+    agent_id="clinical-triage-agent",
+    raw_input="Patient is presenting with...",
+)
+```
+
+It integrates directly with the other agents in this portfolio:
+- **clinical-triage-agent** — wrap the triage classification call
+- **prior-auth-research-agent** — wrap before policy research fires
+- **clinical-rag-agent** — wrap the query synthesis step
+- **pph-risk-scoring-agent** — wrap the intervention recommendation node
+
+---
+
+## Known Failure Modes
+
+| Failure Mode | Impact | Mitigation |
+|---|---|---|
+| JCAHO checkpoint LLM call latency | +500–1500ms added to every agent invocation | Cache JCAHO verdicts for identical input hashes; tune prompt for speed |
+| Regex false positives (e.g., phone-like numbers) | PHI masking on non-PHI content | Context-window validation around match before masking |
+| NER-detectable PHI (names, dates) passes regex scan | Partial PHI leakage | Presidio integration is the roadmap fix for this specific gap |
+| SQLite audit log in production | Concurrency issues under load | Migrate to PostgreSQL `guardrail_audit_log` via `audit/logger.py` for production |
+
+---
+
+## Local Development
 
 ```bash
 git clone https://github.com/jsfaulkner86/healthcare-compliance-guardrail
 cd healthcare-compliance-guardrail
-python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
+python -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
+
+psql $DATABASE_URL -f audit/migrations/001_create_guardrail_audit_log.sql
+
 python main.py
+pytest tests/ -v
 ```
-
-## Environment Variables
-
-```
-OPENAI_API_KEY=your_key_here
-```
-
-## Background
-
-Built by [John Faulkner](https://linkedin.com/in/johnathonfaulkner), Agentic AI Architect and founder of [The Faulkner Group](https://thefaulknergroupadvisors.com). Designed from real HIPAA compliance requirements encountered across enterprise Epic EHR deployments.
-
-## What's Next
-- HITRUST control mapping integration
-- Real-time PHI detection using NER models
-- Pluggable rule engine for custom compliance policies
 
 ---
-*Part of a portfolio of healthcare agentic AI systems. See all projects at [github.com/jsfaulkner86](https://github.com/jsfaulkner86)*
+
+## What's Next
+
+- Full 18-identifier PHI coverage via Presidio NER
+- Pluggable rule engine for custom compliance policies per agent
+- HITRUST CSF control mapping layer
+- Real-time PHI detection using AWS Comprehend Medical
+- Migrate SQLite audit to PostgreSQL `guardrail_audit_log` by default
+
+---
+
+*Part of The Faulkner Group’s healthcare agentic AI portfolio → [github.com/jsfaulkner86](https://github.com/jsfaulkner86)*
