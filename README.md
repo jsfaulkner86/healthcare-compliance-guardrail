@@ -4,12 +4,12 @@
 
 # 🛡️ Healthcare Compliance Guardrail
 
-**Every healthcare AI team builds this from scratch.**  
-**PHI check here. Disclaimer there. Regex on the output. Hope for the best.**  
+**Every healthcare AI team builds this from scratch.**
+**PHI check here. Disclaimer there. Regex on the output. Hope for the best.**
 **That's not a compliance posture. That's compounding risk.**
 
-This is the **compliance middleware layer** that wraps any healthcare agent —  
-PHI scan, JCAHO gate, LLM execution, output scan, append-only audit trail —  
+This is the **compliance middleware layer** that wraps any healthcare agent —
+PHI scan, JCAHO gate, LLM execution, output scan, append-only audit trail —
 in a single `await guardrail_middleware(agent_fn, input)` call.
 
 <br />
@@ -123,7 +123,7 @@ This guardrail wraps any agent in this portfolio (or yours):
 | Agent | Integration Point |
 |---|---|
 | [`clinical-triage-agent`](https://github.com/jsfaulkner86/clinical-triage-agent) | Wrap the triage classification call |
-| [`prior-auth-research-agent`](https://github.com/jsfaulkner86/prior-auth-research-agent) | Wrap before policy research fires |
+| [`agentic-healthcare-ops`](https://github.com/jsfaulkner86/agentic-healthcare-ops) | Wrap prior auth LangGraph pipeline before Availity submission |
 | [`clinical-rag-agent`](https://github.com/jsfaulkner86/clinical-rag-agent) | Wrap the query synthesis step |
 | [`pph-risk-scoring-agent`](https://github.com/jsfaulkner86/pph-risk-scoring-agent) | Wrap the intervention recommendation node |
 | Your custom agent | Any `async def agent_fn(input: str) -> str` |
@@ -269,16 +269,6 @@ python main.py
 pytest tests/ -v
 ```
 
-### Environment Variables
-
-```env
-OPENAI_API_KEY=your_key_here
-DATABASE_URL=postgresql://user:pass@localhost:5432/guardrail_db
-AUDIT_LOG_ENABLED=true
-HIPAA_MODE=true
-JCAHO_CHECKPOINT_ENABLED=true
-```
-
 ---
 
 ## Roadmap
@@ -296,6 +286,8 @@ JCAHO_CHECKPOINT_ENABLED=true
 If this pattern is useful to you, a ⭐ helps others find it.
 
 If you're building clinical AI and need a compliance architecture that will hold up to a HIPAA audit — this is the kind of infrastructure I design at [The Faulkner Group](https://thefaulknergroupadvisors.com).
+
+> ⚠️ See [DISCLAIMER.md](./DISCLAIMER.md) for important limitations on PHI coverage, JCAHO checkpoint reliability, and production deployment requirements.
 
 ---
 
