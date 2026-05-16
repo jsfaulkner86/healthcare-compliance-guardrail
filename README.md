@@ -6,7 +6,6 @@
 
 **Every healthcare AI team builds this from scratch.**
 **PHI check here. Disclaimer there. Regex on the output. Hope for the best.**
-**That's not a compliance posture.**
 
 This is the **compliance middleware layer** that wraps any healthcare agent —
 PHI scan, JCAHO gate, LLM execution, output scan, append-only audit trail —
